@@ -1,5 +1,4 @@
 google-cloud-aiplatform==1.68.0
 google-cloud-bigquery==3.26.0
 streamlit==1.38.0
-db-dtypes
-statsmodels
+db-dtypes==1.4.0

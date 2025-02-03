@@ -1,11 +1,10 @@
 import time
-import statsmodels.api as sm
-import pandas as pd
-import streamlit as st
+
 from google.cloud import bigquery
+import streamlit as st
 from vertexai.generative_models import FunctionDeclaration, GenerativeModel, Part, Tool
 
-BIGQUERY_DATASET_ID = "ingka-ushub-whartonfy25-test.ikea_yellow"
+BIGQUERY_DATASET_ID = "amazon_dataset"
 
 list_datasets_func = FunctionDeclaration(
     name="list_datasets",
@@ -118,80 +117,12 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"].replace("$", r"\$"))  # noqa: W605
         try:
-            with st.expander("Function calls, parameters, and responses"):
+            with st.expander("SQL query backlog"):
                 st.markdown(message["backend_details"])
         except KeyError:
             pass
 
-TARGET_TABLE = "country_goals_tbl_with_yr_ago"
-client = bigquery.Client()
-
-def run_regression(df, dependent_var, independent_vars):
-
-    df = df.dropna(subset=[dependent_var] + independent_vars)
-
-    df[dependent_var] = df[dependent_var].astype(float)
-    df[independent_vars] = df[independent_vars].astype(float)
-
-    if df.empty:
-        st.error("Error: No valid numeric data found for regression after conversion!")
-        return "No valid data to run regression."
-
-    X = df[independent_vars]
-    X = sm.add_constant(X)  # Adds intercept
-    y = df[dependent_var]
-
-    model = sm.OLS(y, X).fit()
-    return model.summary()
-
-def find_table_and_run_regression():
-    # Step 1: List Datasets
-    datasets = list(client.list_datasets())
-    dataset_ids = [dataset.dataset_id for dataset in datasets]
-
-    if BIGQUERY_DATASET_ID.split(".")[-1] not in dataset_ids:
-        st.error(f"Dataset {BIGQUERY_DATASET_ID} not found!")
-        return
-
-    # Step 2: List Tables in the Target Dataset
-    tables = list(client.list_tables(BIGQUERY_DATASET_ID))
-    table_ids = [table.table_id for table in tables]
-
-    if TARGET_TABLE not in table_ids:
-        st.error(f"Table '{TARGET_TABLE}' not found in dataset '{BIGQUERY_DATASET_ID}'!")
-        return
-
-    # Step 3: Fetch Table Metadata (Optional but useful)
-    table_ref = f"{BIGQUERY_DATASET_ID}.{TARGET_TABLE}"
-    table = client.get_table(table_ref)
-    column_names = [field.name for field in table.schema]
-
-    # Step 4: Query Data
-    query = f"SELECT * FROM `{table_ref}`"
-    df = client.query(query).to_dataframe()
-
-    # Step 5: Define Regression Variables
-    dependent_var = "cre_net_sales_ty"
-    independent_vars = ["online_store_visits_ty", "gross_transactions_ty"]
-
-    # Check if columns exist before running regression
-    if not all(col in df.columns for col in [dependent_var] + independent_vars):
-        st.error(f"One or more required columns are missing: {dependent_var}, {independent_vars}")
-        return
-
-    # Step 6: Run Regression
-    result = run_regression(df, dependent_var, independent_vars)
-    st.text(result)
-
 if prompt := st.chat_input("Ask me about information in the database..."):
-
-    if "run regression" in prompt.lower():
-        find_table_and_run_regression()
-    else:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -373,3 +304,4 @@ if prompt := st.chat_input("Ask me about information in the database..."):
                     "content": error_message,
                 }
             )
+
