@@ -123,7 +123,7 @@ for message in st.session_state.messages:
         except KeyError:
             pass
 
-TARGET_TABLE = "country_goals_tbl_with_yr_ago"
+TARGET_TABLE = "country_goals_tbl"
 client = bigquery.Client()
 
 def run_regression(df, dependent_var, independent_vars):
@@ -145,7 +145,6 @@ def run_regression(df, dependent_var, independent_vars):
     return model.summary()
 
 def find_table_and_run_regression():
-    # Step 1: List Datasets
     datasets = list(client.list_datasets())
     dataset_ids = [dataset.dataset_id for dataset in datasets]
 
@@ -153,7 +152,6 @@ def find_table_and_run_regression():
         st.error(f"Dataset {BIGQUERY_DATASET_ID} not found!")
         return
 
-    # Step 2: List Tables in the Target Dataset
     tables = list(client.list_tables(BIGQUERY_DATASET_ID))
     table_ids = [table.table_id for table in tables]
 
@@ -161,36 +159,157 @@ def find_table_and_run_regression():
         st.error(f"Table '{TARGET_TABLE}' not found in dataset '{BIGQUERY_DATASET_ID}'!")
         return
 
-    # Step 3: Fetch Table Metadata (Optional but useful)
     table_ref = f"{BIGQUERY_DATASET_ID}.{TARGET_TABLE}"
     table = client.get_table(table_ref)
     column_names = [field.name for field in table.schema]
 
-    # Step 4: Query Data
     query = f"SELECT * FROM `{table_ref}`"
     df = client.query(query).to_dataframe()
 
-    # Step 5: Define Regression Variables
     dependent_var = "cre_net_sales_ty"
     independent_vars = ["online_store_visits_ty", "gross_transactions_ty"]
 
-    # Check if columns exist before running regression
     if not all(col in df.columns for col in [dependent_var] + independent_vars):
         st.error(f"One or more required columns are missing: {dependent_var}, {independent_vars}")
         return
 
-    # Step 6: Run Regression
     result = run_regression(df, dependent_var, independent_vars)
     st.text(result)
+
+def fetch_bigquery_data(query):
+    """Executes a BigQuery query and returns a Pandas DataFrame."""
+    query_job = client.query(query)
+    return query_job.to_dataframe()
+
+queries = {
+    "Created Net Sales": """
+        SELECT 
+            "Total" AS sales_channel,
+            ROUND(SUM(cre_net_sales_ty),1) AS created_net_sales,
+            ROUND(SUM(cre_net_sales_ly),1) AS created_net_sales_ly,
+            ROUND((SUM(cre_net_sales_ty) / SUM(cre_net_sales_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        UNION ALL
+        SELECT 
+            sales_channel,
+            ROUND(SUM(cre_net_sales_ty),1) AS created_net_sales,
+            ROUND(SUM(cre_net_sales_ly),1) AS created_net_sales_ly,
+            ROUND((SUM(cre_net_sales_ty) / SUM(cre_net_sales_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        GROUP BY sales_channel;
+    """,
+
+    "Created Net Transactions": """
+        SELECT 
+            "Total" AS sales_channel,
+            ROUND(SUM(cre_net_transactions_ty),1) AS created_net_transactions,
+            ROUND(SUM(cre_net_transactions_ly),1) AS created_net_transactions_ly,
+            ROUND((SUM(cre_net_transactions_ty) / SUM(cre_net_transactions_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        UNION ALL
+        SELECT 
+            sales_channel,
+            ROUND(SUM(cre_net_transactions_ty),1) AS created_net_transactions,
+            ROUND(SUM(cre_net_transactions_ly),1) AS created_net_transactions_ly,
+            ROUND((SUM(cre_net_transactions_ty) / SUM(cre_net_transactions_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        GROUP BY sales_channel;
+    """,
+
+    "Average Order Value": """
+        SELECT 
+            "Total" AS sales_channel,
+            ROUND(SUM(cre_net_sales_ty) / SUM(cre_net_transactions_ty),2) AS avg_order_value,
+            ROUND((SUM(cre_net_sales_ty) / SUM(cre_net_transactions_ty)) / 
+                  (SUM(cre_net_sales_ly) / SUM(cre_net_transactions_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        UNION ALL
+        SELECT 
+            sales_channel,
+            ROUND(SUM(cre_net_sales_ty) / SUM(cre_net_transactions_ty),2) AS avg_order_value,
+            ROUND((SUM(cre_net_sales_ty) / SUM(cre_net_transactions_ty)) / 
+                  (SUM(cre_net_sales_ly) / SUM(cre_net_transactions_ly)) * 100,1) AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE date BETWEEN '2024-01-01' AND '2024-12-31'
+        GROUP BY sales_channel;
+    """,
+
+    "Store Visitation": """
+        SELECT 
+            SUM(online_store_visits_ty) AS store_visitation,
+            (SUM(online_store_visits_ty) / SUM(online_store_visits_ly)) * 100 AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE sales_channel = 'Store'
+        AND date BETWEEN '2024-01-01' AND '2024-12-31';
+    """,
+
+    "National Online Sessions": """
+        SELECT 
+            SUM(online_store_visits_ty) AS national_online_sessions,
+            (SUM(online_store_visits_ty) / SUM(online_store_visits_ly)) * 100 AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE sales_channel = 'Online'
+        AND date BETWEEN '2024-01-01' AND '2024-12-31';
+    """,
+
+    "Store Conversion": """
+        SELECT 
+            (SUM(cre_net_transactions_ty) / SUM(online_store_visits_ty)) * 100 AS store_conversion,
+            ((SUM(cre_net_transactions_ty) / SUM(online_store_visits_ty)) / 
+            (SUM(cre_net_transactions_ly) / SUM(online_store_visits_ly))) * 100 AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE sales_channel = 'Store'
+        AND date BETWEEN '2024-01-01' AND '2024-12-31';
+    """,
+
+    "Online Conversion": """
+        SELECT 
+            (SUM(cre_net_transactions_ty) / SUM(online_store_visits_ty)) * 100 AS online_conversion,
+            ((SUM(cre_net_transactions_ty) / SUM(online_store_visits_ty)) / 
+            (SUM(cre_net_transactions_ly) / SUM(online_store_visits_ly))) * 100 AS yoy_index
+        FROM `ingka-ushub-whartonfy25-test.ikea_yellow.country_goals_tbl`
+        WHERE sales_channel = 'Online'
+        AND date BETWEEN '2024-01-01' AND '2024-12-31';
+    """
+}
+
+st.title("HFO Sales Tree (2024)")
+
+st.subheader("Sales Performance")
+sales_df = fetch_bigquery_data(queries["Created Net Sales"])
+transactions_df = fetch_bigquery_data(queries["Created Net Transactions"])
+st.dataframe(sales_df)
+st.dataframe(transactions_df)
+
+st.subheader("Performance Breakdown")
+col1, col2 = st.columns(2)
+
+with col1:
+    avg_order_value_df = fetch_bigquery_data(queries["Average Order Value"])
+    st.dataframe(avg_order_value_df)
+
+    store_visitation_df = fetch_bigquery_data(queries["Store Visitation"])
+    st.dataframe(store_visitation_df)
+
+    store_conversion_df = fetch_bigquery_data(queries["Store Conversion"])
+    st.dataframe(store_conversion_df)
+
+with col2:
+    online_sessions_df = fetch_bigquery_data(queries["National Online Sessions"])
+    st.dataframe(online_sessions_df)
+
+    online_conversion_df = fetch_bigquery_data(queries["Online Conversion"])
+    st.dataframe(online_conversion_df)
 
 if prompt := st.chat_input("Ask me about information in the database..."):
 
     if "run regression" in prompt.lower():
         find_table_and_run_regression()
-    else:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
 
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
